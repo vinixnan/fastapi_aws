@@ -1,0 +1,16 @@
+{
+    "repository": {
+        "repositoryArn": "arn:aws:ecr:us-east-1:388895620167:repository/fastapi_aws",
+        "registryId": "388895620167",
+        "repositoryName": "fastapi_aws",
+        "repositoryUri": "388895620167.dkr.ecr.us-east-1.amazonaws.com/fastapi_aws",
+        "createdAt": "2022-11-30T23:02:05-03:00",
+        "imageTagMutability": "MUTABLE",
+        "imageScanningConfiguration": {
+            "scanOnPush": false
+        },
+        "encryptionConfiguration": {
+            "encryptionType": "AES256"
+        }
+    }
+}
