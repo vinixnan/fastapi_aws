@@ -1,0 +1,276 @@
+Parameters:
+  Tag:
+    Type: String
+    Default: "vpcx"
+  pNatInstanceType:
+    Type: String
+    Default: "t3.micro"
+  SshKeyParameter:
+    Description: SSH Keypair to login to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+  AvailabilityZone:
+    Type: String
+    Default: "us-east-1a"
+  myImageId:
+    Type: String
+    #Default: "ami-0b0ea68c435eb488d"
+    Default: "ami-0403fbe59b91a6b7a"
+  cidrPublic:
+    Type: String
+    Default: "10.0.0.0/24"
+  cidrPrivate:
+    Type: String
+    Default: "10.0.1.0/24"
+  cidrVPC:
+    Type: String
+    Default: "10.0.0.0/16"
+
+Resources:
+  #Network definition
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Ref cidrVPC
+      InstanceTenancy: "default"
+      Tags:
+        - Key: "Name"
+          Value: !Ref Tag
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+
+  VPCGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  #Public Subnet
+  PublicSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Ref AvailabilityZone
+      VpcId: !Ref "VPC"
+      CidrBlock: !Ref cidrPublic
+
+  PublicRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicSubnetRouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  InternetRoute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  #Private subnet
+  PrivateSubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      VpcId: !Ref VPC
+      CidrBlock: !Ref cidrPrivate
+
+  PrivateRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateSubnetRouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+  #NAT GATEWAY
+  EIP:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+
+  Nat:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+
+  NatRoute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref Nat
+      RouteTableId: !Ref PrivateRouteTable
+
+  #BASTION
+  BastionSercurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Access to the nat instance
+      SecurityGroupIngress:
+        #ssh access
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          sudo -i
+          sudo yum update -y
+          sudo yum upgrade -y
+      InstanceType: !Ref pNatInstanceType
+      ImageId: !Ref myImageId
+      KeyName: !Ref SshKeyParameter
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref BastionSercurityGroup
+          SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: "Name"
+          Value: "BastionInstance"
+
+  #PUBLIC SITE
+  PublicSercurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Access to the nat instance
+      SecurityGroupIngress:
+        # http & https trafic
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        #ssh access
+        - CidrIp: !Ref cidrVPC
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+
+  PublicInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          sudo -i
+          sudo yum update -y
+          sudo yum upgrade -y
+          sudo yum install nginx -y
+      InstanceType: !Ref pNatInstanceType
+      ImageId: !Ref myImageId
+      KeyName: !Ref SshKeyParameter
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref PublicSercurityGroup
+          SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: "Name"
+          Value: "SiteInstance"
+
+  #PrivateInstance
+  PrivateSercurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Access to the nat instance
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        #ssh access
+        - CidrIp: !Ref cidrVPC
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+
+  SuperPrivateSercurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Access to the nat instance
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        # http & https trafic
+        - CidrIp: !Ref cidrPrivate
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: !Ref cidrPrivate
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        #ssh access
+        - CidrIp: !Ref cidrPrivate
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+
+  PrivateInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          sudo -i
+          sudo yum update -y
+          sudo yum upgrade -y
+      InstanceType: !Ref pNatInstanceType
+      ImageId: !Ref myImageId
+      KeyName: !Ref SshKeyParameter
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref PrivateSercurityGroup
+          SubnetId: !Ref PrivateSubnet
+      Tags:
+        - Key: "Name"
+          Value: "PrivateInstance"
+
+  SuperPrivateInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          sudo -i
+          sudo yum update -y
+          sudo yum upgrade -y
+      InstanceType: !Ref pNatInstanceType
+      ImageId: !Ref myImageId
+      KeyName: !Ref SshKeyParameter
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref SuperPrivateSercurityGroup
+          SubnetId: !Ref PrivateSubnet
+      Tags:
+        - Key: "Name"
+          Value: "SuperPrivateInstance"
+
+Outputs:
+  VpcId:
+    Description: The VPC ID
+    Value: !Ref VPC
