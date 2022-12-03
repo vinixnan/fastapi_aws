@@ -11,10 +11,12 @@ Parameters:
   AvailabilityZone:
     Type: String
     Default: "us-east-1a"
-  myImageId:
+  amazon2AMIImageId:
     Type: String
-    #Default: "ami-0b0ea68c435eb488d"
     Default: "ami-0403fbe59b91a6b7a"
+  ubuntuImageId:
+    Type: String
+    Default: "ami-0574da719dca65348"
   cidrPublic:
     Type: String
     Default: "10.0.0.0/24"
@@ -128,11 +130,12 @@ Resources:
     Properties:
       UserData:
         Fn::Base64: !Sub |
+          #!/bin/bash
           sudo -i
           sudo yum update -y
           sudo yum upgrade -y
       InstanceType: !Ref pNatInstanceType
-      ImageId: !Ref myImageId
+      ImageId: !Ref amazon2AMIImageId
       KeyName: !Ref SshKeyParameter
       NetworkInterfaces:
         - AssociatePublicIpAddress: "true"
@@ -169,14 +172,37 @@ Resources:
   PublicInstance:
     Type: AWS::EC2::Instance
     Properties:
+      IamInstanceProfile: !Ref InstanceProfile
       UserData:
         Fn::Base64: !Sub |
-          sudo -i
-          sudo yum update -y
-          sudo yum upgrade -y
-          sudo yum install nginx -y
+          #!/bin/bash
+          sudo apt update -y
+          sudo apt upgrade -y
+          sudo apt install jq unzip build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev wget gnupg python3 curl gnupg lsb-release -y
+          echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee /etc/apt/sources.list.d/focal-security.list
+          sudo apt-get update
+          sudo apt install libssl1.1 -y
+          sudo apt install -y software-properties-common gnupg apt-transport-https ca-certificates
+          wget -qO - https://www.mongodb.org/static/pgp/server-5.0.asc | sudo apt-key add -
+          echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/5.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-5.0.list
+          sudo apt-get update
+          sudo apt install -y mongocli
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin -y
+          sudo chmod 666 /var/run/docker.sock
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+          myregion=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed 's/\(.*\)[a-z]/\1/')
+          repositoryUri=$(aws ecr describe-repositories --repository-name fastapi_aws | jq -r ".repositories[0].repositoryUri")
+          aws ecr get-login-password --region $myregion | docker login --username AWS --password-stdin $repositoryUri
+          docker pull $repositoryUri:v1
+          docker run -d -p 80:80 --name api $repositoryUri:v1
       InstanceType: !Ref pNatInstanceType
-      ImageId: !Ref myImageId
+      ImageId: !Ref ubuntuImageId
       KeyName: !Ref SshKeyParameter
       NetworkInterfaces:
         - AssociatePublicIpAddress: "true"
@@ -202,6 +228,10 @@ Resources:
         - CidrIp: !Ref cidrVPC
           FromPort: 22
           ToPort: 22
+          IpProtocol: tcp
+        - CidrIp: !Ref cidrVPC
+          FromPort: 27017
+          ToPort: 27018
           IpProtocol: tcp
 
   SuperPrivateSercurityGroup:
@@ -233,11 +263,22 @@ Resources:
     Properties:
       UserData:
         Fn::Base64: !Sub |
-          sudo -i
-          sudo yum update -y
-          sudo yum upgrade -y
+          #!/bin/bash
+          sudo apt update -y
+          sudo apt upgrade -y
+          sudo apt install build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev wget gnupg python3 curl gnupg lsb-release -y
+          echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee /etc/apt/sources.list.d/focal-security.list
+          sudo apt-get update
+          sudo apt install libssl1.1 -y
+          sudo apt install -y software-properties-common gnupg apt-transport-https ca-certificates
+          wget -qO - https://www.mongodb.org/static/pgp/server-5.0.asc | sudo apt-key add -
+          echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/5.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-5.0.list
+          sudo apt-get update
+          sudo apt install mongodb-org -y
+          sudo systemctl start mongod.service
+          sudo systemctl enable mongod
       InstanceType: !Ref pNatInstanceType
-      ImageId: !Ref myImageId
+      ImageId: !Ref ubuntuImageId
       KeyName: !Ref SshKeyParameter
       NetworkInterfaces:
         - AssociatePublicIpAddress: "true"
@@ -254,11 +295,12 @@ Resources:
     Properties:
       UserData:
         Fn::Base64: !Sub |
+          #!/bin/bash
           sudo -i
           sudo yum update -y
           sudo yum upgrade -y
       InstanceType: !Ref pNatInstanceType
-      ImageId: !Ref myImageId
+      ImageId: !Ref amazon2AMIImageId
       KeyName: !Ref SshKeyParameter
       NetworkInterfaces:
         - AssociatePublicIpAddress: "true"
@@ -269,6 +311,39 @@ Resources:
       Tags:
         - Key: "Name"
           Value: "SuperPrivateInstance"
+
+  Ec2Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+        Version: 2012-10-17
+      Path: /
+      Policies:
+        - PolicyName: Ec2Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ssm:GetParameters"
+                  - "ssm:GetParameter"
+                  - "ecr:*"
+                Resource: "*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: site-ec2-instance-profile
+      Path: /
+      Roles:
+        - !Ref Ec2Role
 
 Outputs:
   VpcId:
