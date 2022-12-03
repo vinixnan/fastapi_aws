@@ -186,7 +186,7 @@ Resources:
           wget -qO - https://www.mongodb.org/static/pgp/server-5.0.asc | sudo apt-key add -
           echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/5.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-5.0.list
           sudo apt-get update
-          sudo apt install -y mongocli
+          sudo apt install mongodb-org -y
           sudo mkdir -p /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
@@ -198,9 +198,9 @@ Resources:
           sudo ./aws/install
           myregion=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed 's/\(.*\)[a-z]/\1/')
           repositoryUri=$(aws ecr describe-repositories --repository-name fastapi_aws | jq -r ".repositories[0].repositoryUri")
-          aws ecr get-login-password --region $myregion | docker login --username AWS --password-stdin $repositoryUri
-          docker pull $repositoryUri:v1
-          docker run -d -p 80:80 --name api $repositoryUri:v1
+          aws ecr get-login-password --region $myregion | sudo docker login --username AWS --password-stdin $repositoryUri
+          sudo docker pull $repositoryUri:v1
+          sudo docker run -d -p 80:80 --name api $repositoryUri:v1
       InstanceType: !Ref pNatInstanceType
       ImageId: !Ref ubuntuImageId
       KeyName: !Ref SshKeyParameter
