@@ -171,6 +171,7 @@ Resources:
 
   PublicInstance:
     Type: AWS::EC2::Instance
+    DependsOn: PrivateInstance
     Properties:
       IamInstanceProfile: !Ref InstanceProfile
       UserData:
@@ -178,6 +179,7 @@ Resources:
           #!/bin/bash
           sudo apt update -y
           sudo apt upgrade -y
+          echo "DATABASE_URL=${PrivateInstance.PrivateIp}" > .env
           sudo apt install jq unzip build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev wget gnupg python3 curl gnupg lsb-release -y
           sudo apt install python3-pip -y
           echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee /etc/apt/sources.list.d/focal-security.list
@@ -201,7 +203,7 @@ Resources:
           export repositoryUri=$(aws ecr describe-repositories --repository-name fastapi_aws | jq -r ".repositories[0].repositoryUri")
           aws ecr get-login-password --region $myregion | sudo docker login --username AWS --password-stdin $repositoryUri
           sudo docker pull $repositoryUri:v2
-          sudo docker run -d -p 80:80 --name api $repositoryUri:v2 --env-file .env
+          sudo docker run --env-file .env -d -p 80:80 --name api $repositoryUri:v2
       InstanceType: !Ref pNatInstanceType
       ImageId: !Ref ubuntuImageId
       KeyName: !Ref SshKeyParameter

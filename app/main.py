@@ -1,7 +1,6 @@
-from typing import Union
 from fastapi import FastAPI
 from pymongo import MongoClient
-import datetime
+from app.routes import router as book_router
 import os
 
 app = FastAPI()
@@ -9,18 +8,20 @@ app = FastAPI()
 
 @app.get("/")
 def read_root():
-    return {"Hello": "World"}
+    return {"Status": "API Online"}
 
 
-@app.get("/items/{item_id}")
-def read_item(item_id: int, q: Union[str, None] = None):
-    database_url = os.environ.get('DATABASE_URL')
-    client = MongoClient(database_url, 27017)
-    db = client.test_database
-    post = {"idx": item_id,
-            "text": "My first blog post!",
-            "tags": ["mongodb", "python", "pymongo"],
-            "date": datetime.datetime.utcnow()}
-    posts = db.posts
-    post_id = posts.insert_one(post).inserted_id
-    return {"item_id": item_id, "q": q, "id": post_id}
+@app.on_event("startup")
+def startup_db_client():
+    database_url = os.environ.get('DATABASE_URL', '127.0.0.1')
+    base = "books"
+    app.mongodb_client = MongoClient(database_url)
+    app.database = app.mongodb_client[base]
+
+
+@app.on_event("shutdown")
+def shutdown_db_client():
+    app.mongodb_client.close()
+
+
+app.include_router(book_router, tags=["books"], prefix="/book")
